@@ -1,266 +1,145 @@
-# SuSiEx Fine-mapping Pipeline
+# SuSiEx Fine-Mapping Pipeline
 
-A shared bash + Snakemake pipeline for cross-cohort statistical fine-mapping
-with [SuSiEx](https://github.com/getian107/SuSiEx). One install on the cluster,
-many users; each user keeps their analysis directory wherever they like.
+A shared bash + Snakemake pipeline for cross-cohort statistical fine-mapping with [SuSiEx](https://github.com/getian107/SuSiEx). 
 
-## How it runs
+Designed for high-performance computing (HPC) environments using SLURM, this pipeline allows for a single cluster installation that multiple users can leverage. Each user can scaffold and run their own isolated analyses without interfering with the core codebase.
 
+## 🧠 Architecture & Workflow
+
+```mermaid
+flowchart TD
+    %% =========================================================
+    %% SuSiEx pipeline -- execution flow
+    %% =========================================================
+
+    User([User in analysis dir]) -->|Runs| Submit[/"sbatch submit.sh"/]
+
+    %% ---------- Controller layer ----------
+    subgraph Controller["SLURM Controller Job (4GB / 2 CPUs / 24h)"]
+        direction TB
+        ActVenv["source venv/bin/activate"] --> Snake["Snakemake Orchestrator<br/>--snakefile Snakefile<br/>--profile snakemake_slurm_profile<br/>--use-envmodules"]
+    end
+
+    Submit --> ActVenv
+
+    %% ---------- Data Preparation (Per Cohort) ----------
+    Snake ==>|Submits N Jobs| PrepGroup
+
+    subgraph PrepGroup["Rule: prepare_input (Parallel per Cohort)"]
+        direction TB
+        Prep1["Cohort: A4"] --> PrepScript
+        Prep2["Cohort: ADNI"] --> PrepScript
+        PrepN["Cohort: NACC..."] --> PrepScript
+        PrepScript["scripts/prepare_susiex_input.sh<br/>(BIM + assoc -> SuSiEx input)"]
+    end
+
+    PrepScript --> InputFiles[("inputs/&lt;cohort&gt;_susiex_input.txt")]
+
+    %% ---------- SuSiEx Execution (Per Locus) ----------
+    InputFiles ==>|All cohort inputs ready| SusiexGroup
+
+    subgraph SusiexGroup["Rule: susiex_locus (Parallel per Locus)"]
+        direction TB
+        Sus1["Locus: APOE"] --> SusiexScript
+        Sus2["Locus: chr9_27Mb"] --> SusiexScript
+        SusN["Locus: ..."] --> SusiexScript
+        SusiexScript["scripts/run_susiex_one_locus.sh<br/>(Builds args -> Runs SuSiEx)"]
+    end
+
+    SusiexScript --> SusiexOut[("loci/&lt;locus&gt;/<br/>SuSiEx.&lt;phenotype&gt;.&lt;locus&gt;.cs & .snp")]
+
+    %% ---------- Plotting (Per Locus) ----------
+    SusiexOut ==>|Per locus complete| PlotGroup
+
+    subgraph PlotGroup["Rule: plot_locus (Parallel per Locus)"]
+        direction TB
+        Plot1["Locus: APOE"] --> PlotScript
+        Plot2["Locus: chr9_27Mb"] --> PlotScript
+        PlotN["Locus: ..."] --> PlotScript
+        PlotScript["plot_susiex_pip.R<br/>(module load r/4.5.0)"]
+    end
+
+    PlotScript --> PlotOut[("loci/&lt;locus&gt;/<br/>&lt;phenotype&gt;.&lt;locus&gt;_PIP.pdf & .png")]
+
+    %% ---------- Final ----------
+    PlotOut ==> Done([All loci complete])
+
+    %% ---------- Styling ----------
+    classDef controller fill:#e1f5ff,stroke:#0288d1,stroke-width:2px,color:#000
+    classDef rule       fill:#fff4e1,stroke:#f57c00,stroke-width:2px,color:#000
+    classDef script     fill:#f3e5f5,stroke:#7b1fa2,stroke-width:1px,color:#000
+    classDef output     fill:#e8f5e9,stroke:#388e3c,stroke-width:1px,color:#000
+    classDef user       fill:#fff,stroke:#000,stroke-width:2px,color:#000
+
+    class User,Submit,Done user
+    class Controller,ActVenv,Snake controller
+    class Prep1,Prep2,PrepN,Sus1,Sus2,SusN,Plot1,Plot2,PlotN rule
+    class PrepScript,SusiexScript,PlotScript script
+    class InputFiles,SusiexOut,PlotOut output
 ```
-       ┌──────────────────────────────────────────┐
-User → │ sbatch submit.sh  (in their analysis dir)│
-       └────────────┬─────────────────────────────┘
-                    ↓
-       ┌──────────────────────────────────────────┐
-       │ Outer SLURM job: activates shared venv,  │  ← tiny, just runs
-       │ runs Snakemake against shared Snakefile  │     Snakemake
-       └────────────┬─────────────────────────────┘
-                    ↓
-                 Snakemake
-                    ↓ submits one SLURM job per locus
-       ┌──────────────────────────────────────────┐
-       │ Per-locus SuSiEx jobs, run in parallel   │
-       │ via the SLURM executor plugin            │
-       └──────────────────────────────────────────┘
-```
 
-The user submits one tiny controller job. Snakemake handles the parallelism,
-dependency tracking, resume-on-failure, and per-locus SLURM submission.
+## 🛠️ Admin Installation (One-Time Setup)
 
-## Admin install (one-time)
-
-Drop the pipeline directory anywhere on a shared filesystem your group can
-read, then run the installer:
+Clone this repository onto a shared filesystem where your group has read and execute permissions.
 
 ```bash
-cd /data/h_vmac/zhanm32/software/
-git clone <repo-url> susiex_pipeline    # or rsync/cp
+git clone <your-github-repo-url> susiex_pipeline
 cd susiex_pipeline
 
-# Edit the admin-default binary paths
-vim config/pipeline.yaml                 # set susiex_bin and plink_bin
+# 1. Edit the admin-default binary paths
+vim config/pipeline.yaml                 # Set global susiex_bin and plink_bin paths
 
-# Edit the SLURM profile for your cluster's partition / account
+# 2. Edit the SLURM profile for your cluster's partition / account
 vim snakemake_slurm_profile/config.yaml
 
-# Install: creates venv, installs Snakemake, sets group permissions
+# 3. Install dependencies and set permissions
 ./install.sh
 
-# Verify everything is wired up correctly
+# 4. Verify everything is wired up correctly
 ./verify_install.sh
 ```
 
-`install.sh` will:
+## 🚀 User Workflow
 
-1. Create a Python venv at `<install>/venv/` and install `snakemake`,
-   `snakemake-executor-plugin-slurm`, and `pyyaml`.
-2. Make all scripts group-readable and group-executable.
-3. Verify external tools (`Rscript`, `awk`, `sbatch`) are in PATH.
+Users do not need to copy the entire repository. They simply use the pipeline launcher to scaffold an analysis in their own workspace.
 
-`verify_install.sh` runs after install and checks that the venv works,
-Snakemake imports the SLURM plugin, R packages load via the configured
-`.libPaths()`, and admin defaults point at real binaries.
-
-R packages are loaded from a shared library path baked into
-`plot_susiex_pip.R` via `.libPaths()`. R itself is loaded via the cluster's
-module system (the `plot_locus` rule in the Snakefile uses an `envmodules:`
-directive to `module load r/4.5.0` at runtime, and `submit.sh` runs
-Snakemake with `--use-envmodules`). To use a different R version or a
-different shared library location, edit those two lines.
-
-### Customizing the SLURM profile
-
-Edit `snakemake_slurm_profile/config.yaml` to set your cluster's partition
-name, default account, and any flags Snakemake's SLURM executor needs for
-your site. The default partition is `production` — change as appropriate
-for your cluster.
-
-## User workflow
-
-The launcher lives at `<install>/bin/susiex-pipeline`. Two ways to invoke it:
-
-**Option A: Add the install's bin/ to your PATH** (recommended for frequent users)
-
-Add this line to your `~/.bashrc` (one time):
-
+**1. Initialize an Analysis Directory**
 ```bash
-export PATH="/data/h_vmac/zhanm32/software/susiex_pipeline/bin:$PATH"
+mkdir ~/my_finemap_analysis
+cd ~/my_finemap_analysis
+
+# Scaffold configs and submit script
+/path/to/susiex_pipeline/bin/susiex-pipeline init .
 ```
 
-Then `source ~/.bashrc` (or open a new shell). After this, `susiex-pipeline`
-works from anywhere.
+**2. Configure Your Analysis**
+Edit the generated files to match your dataset:
+* `config/pipeline.yaml`: Set your phenotype name and SuSiEx parameters.
+* `config/cohorts.yaml`: List your cohorts and provide paths to `.bim` and GWAS `.assoc` files.
+* `config/loci.tsv`: Define the target loci (chr, start, end).
 
-**Option B: Use the full path** (no setup required)
-
-Just type out the full path each time:
-
+**3. Dry-Run & Submit**
 ```bash
-/data/h_vmac/zhanm32/software/susiex_pipeline/bin/susiex-pipeline init .
-```
+# Verify configs without executing
+/path/to/susiex_pipeline/bin/susiex-pipeline dry-run .
 
-A common pattern is to alias it in your shell:
-
-```bash
-alias susiex='/data/h_vmac/zhanm32/software/susiex_pipeline/bin/susiex-pipeline'
-```
-
-### End-to-end example
-
-```bash
-# 1. Create an analysis directory anywhere you like
-mkdir ~/projects/my_finemap_analysis
-cd    ~/projects/my_finemap_analysis
-
-# 2. Scaffold configs and submit script
-susiex-pipeline init .
-# (or use the full path if PATH not set up:
-#  /data/h_vmac/zhanm32/software/susiex_pipeline/bin/susiex-pipeline init . )
-
-# 3. Edit the configs
-vim config/pipeline.yaml    # phenotype, output dir, SuSiEx params
-vim config/cohorts.yaml     # cohort list with paths to BIM and GWAS files
-vim config/loci.tsv         # loci to fine-map (chr, start, end)
-
-# 4. Optional: dry-run to verify the workflow without submitting
-susiex-pipeline dry-run .
-
-# 5. Submit
+# Submit to SLURM cluster
 sbatch submit.sh
-
-# 6. Monitor
-squeue -u $USER
-tail -f output/<phenotype>/logs/snakemake.log
 ```
 
-After submission, `squeue` will first show one controller job (`susiex_ctrl`).
-Once that starts running, additional per-rule jobs will appear as Snakemake
-submits them.
+## 📊 Outputs
 
-## What the user's analysis directory looks like
+Results are organized cleanly in your analysis directory:
 
-```
-my_finemap_analysis/
-├── config/
-│   ├── pipeline.yaml          # phenotype, paths, SuSiEx params
-│   ├── cohorts.yaml           # cohort manifest
-│   └── loci.tsv               # loci to fine-map
-├── submit.sh                  # generated SLURM controller job
-├── slurm_controller_<JID>.log # outer job log
-└── output/
-    └── <phenotype>/
-        ├── inputs/            # per-cohort SuSiEx input files
-        ├── loci/<locus>/      # per-locus results + plots
-        └── logs/
-            ├── snakemake.log              # Snakemake's master log
-            ├── prepare_input.<cohort>.log
-            ├── susiex.<locus>.log
-            └── plot.<locus>.log
+```text
+output/
+└── <phenotype>/
+    ├── inputs/            # Formatted per-cohort SuSiEx inputs
+    ├── loci/<locus>/      # .cs, .snp files, and PIP scatter plots (.pdf, .png)
+    └── logs/              # Snakemake and per-rule execution logs
 ```
 
-## Re-running and resuming
+## 📚 Citation
 
-Snakemake checks output files and only runs missing or stale ones.
-
-- **Add a locus to `loci.tsv` and re-run:** `sbatch submit.sh` — only the new
-  locus runs.
-- **A locus failed:** fix the issue, `sbatch submit.sh` again — only the
-  failed locus is retried.
-- **Force a full rebuild:** `sbatch submit.sh --forceall`.
-- **Dry-run after edits:** `susiex-pipeline dry-run .` — shows what *would*
-  run without submitting.
-
-## Configuration reference
-
-### `config/pipeline.yaml`
-
-| Key | Description |
-|---|---|
-| `phenotype` | Short label; used in output filenames and folder names |
-| `output_root` | Output base directory (absolute or relative to analysis dir) |
-| `susiex_bin` | Path to SuSiEx binary (admin default pre-filled by `init`) |
-| `plink_bin` | Path to PLINK binary (admin default pre-filled by `init`) |
-| `cohorts_config` | Path to cohorts YAML (default `config/cohorts.yaml`) |
-| `loci_file` | Path to loci TSV (default `config/loci.tsv`) |
-| `susiex.level` | Credible set coverage (e.g., 0.95) |
-| `susiex.pval_thresh` | P-value threshold for variant filtering |
-| `susiex.maf` | Minor allele frequency threshold |
-| `susiex.mult_step` | Use multi-step L selection (recommended) |
-| `susiex.keep_ambig` | Keep strand-ambiguous SNPs |
-| `susiex.threads` | CPUs per SuSiEx job |
-
-### `config/cohorts.yaml`
-
-```yaml
-cohorts:
-  - name: ADNI
-    ancestry: EUR
-    n_gwas: 1411
-    bim_prefix: /path/to/ADNI_imputed_unrelated_final
-    gwas_file:  /path/to/ADNI_baseline.assoc.linear   # or .logistic[.gz]
-```
-
-The pipeline auto-detects linear (`BETA`) vs. logistic (`OR`) assoc files
-and converts OR to log(OR) automatically.
-
-### `config/loci.tsv`
-
-Tab-separated, header required, column order flexible:
-
-```
-locus_name	chr	start	end
-APOE_region	19	44658684	45158684
-chr9_27Mb_locus	9	27015328	27515328
-```
-
-## Repository layout (the install)
-
-```
-susiex_pipeline/
-├── VERSION
-├── README.md
-├── install.sh                          # admin install
-├── Snakefile                           # the workflow (single source of truth)
-├── snakemake_slurm_profile/config.yaml # tells Snakemake to use SLURM
-├── plot_susiex_pip.R
-├── venv/                               # created by install.sh
-├── config/
-│   └── pipeline.yaml                   # admin-edited binary defaults
-├── bin/
-│   └── susiex-pipeline                 # user launcher (init / dry-run / version)
-├── scripts/
-│   ├── prepare_susiex_input.sh         # PLINK assoc -> SuSiEx input (one cohort)
-│   ├── run_susiex_one_locus.sh      # SuSiEx for one locus (called by Snakemake)
-│   └── lib/
-│       ├── common.sh
-│       └── parse_yaml.py
-└── templates/                          # rendered into user analysis dirs
-    ├── pipeline.yaml.template
-    ├── cohorts.yaml.template
-    ├── loci.tsv.template
-    └── submit.sh.template
-```
-
-## Common issues
-
-- **Controller job runs but no per-locus jobs ever appear in `squeue`** —
-  Check the controller's log (`slurm_controller_*.log`); usually a
-  `--profile` problem or the SLURM executor plugin isn't installed in the
-  venv. Re-run `install.sh`.
-- **`snakemake: command not found` in submit.sh** — venv didn't install
-  correctly. Re-run `install.sh` and check for pip errors.
-- **`sbatch: command not found` from inside the controller job** — the
-  cluster doesn't allow nested SLURM submission. Talk to your cluster admin
-  or fall back to running everything in the outer job by replacing
-  `--profile ...` with `--cores N` in `submit.sh`.
-- **PyYAML not found at init time** — the launcher uses the system Python to
-  read admin defaults. Either install PyYAML system-wide, or have the
-  launcher use the venv's Python (small change to `bin/susiex-pipeline`).
-- **Variants dropped at prep** — usually means the cohort's GWAS used a
-  different SNP set than its BIM file. Confirm BIM matches the GWAS sample.
-
-## Citation
-
-> Yuan K, Longchamps RJ, Pardiñas AF, et al. Fine-mapping across diverse
-> ancestries drives the discovery of putative causal variants underlying
-> human complex traits and diseases. *Nat Genet* 56, 1841–1850 (2024).
-> doi:10.1038/s41588-024-01870-z
+If you use this pipeline, please cite the original SuSiEx methodology:
+> Yuan K, Longchamps RJ, Pardiñas AF, et al. Fine-mapping across diverse ancestries drives the discovery of putative causal variants underlying human complex traits and diseases. *Nat Genet* 56, 1841–1850 (2024). doi:10.1038/s41588-024-01870-z
