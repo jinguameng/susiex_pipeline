@@ -1,0 +1,16 @@
+# =============================================================================
+# config/pipeline.yaml -- ADMIN-EDITABLE DEFAULTS
+# =============================================================================
+# This file is NOT used by the workflow directly. Its purpose is to provide
+# default binary paths that get baked into newly-scaffolded user configs by:
+#   susiex-pipeline init
+#
+# Edit susiex_bin and plink_bin here at install time. Users who run
+# `susiex-pipeline init` will get these values pre-populated in their own
+# config/pipeline.yaml and won't have to look them up.
+#
+# Users CAN override either path in their own analysis config if needed.
+# =============================================================================
+
+susiex_bin: /data/h_vmac/zhanm32/software/SuSiEx/bin/SuSiEx
+plink_bin:  /data/h_vmac/zhanm32/software/plink

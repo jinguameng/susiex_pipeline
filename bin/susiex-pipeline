@@ -1,0 +1,172 @@
+#!/bin/bash
+# =============================================================================
+# susiex-pipeline -- user-facing launcher for the SuSiEx fine-mapping pipeline
+# -----------------------------------------------------------------------------
+# Subcommands:
+#   init [dir]         Scaffold an analysis directory: configs + submit.sh
+#   dry-run [dir]      Run snakemake --dry-run against an analysis directory
+#                      (sanity check before submitting)
+#   version            Print pipeline version
+#   help               Show this help
+#
+# Typical user flow:
+#   1. cd ~/projects/my_finemap
+#   2. susiex-pipeline init .
+#   3. Edit config/pipeline.yaml, config/cohorts.yaml, config/loci.tsv
+#   4. susiex-pipeline dry-run .              # optional sanity check
+#   5. sbatch submit.sh
+# =============================================================================
+set -euo pipefail
+
+# ---- Resolve install root, even via symlink ---------------------------------
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PIPELINE_ROOT="$(dirname "$BIN_DIR")"
+export PIPELINE_ROOT
+
+# Prefer the venv's Python (which has PyYAML installed) over system python3.
+# This avoids "ModuleNotFoundError: yaml" on systems whose default Python lacks PyYAML.
+if [[ -x "$PIPELINE_ROOT/venv/bin/python" ]]; then
+    PYTHON="$PIPELINE_ROOT/venv/bin/python"
+else
+    PYTHON="python3"
+fi
+
+usage() {
+    cat <<EOF
+susiex-pipeline -- launcher for the SuSiEx fine-mapping pipeline
+
+Subcommands:
+  init [dir]
+        Scaffold an analysis directory with template configs and a
+        ready-to-submit submit.sh. Defaults to current directory.
+
+  dry-run [dir]
+        Run snakemake --dry-run to verify configs without submitting.
+        Defaults to current directory.
+
+  version
+        Print pipeline version.
+
+Pipeline install: $PIPELINE_ROOT
+
+Quick start:
+  cd ~/projects/my_analysis
+  susiex-pipeline init .
+  vim config/pipeline.yaml config/cohorts.yaml config/loci.tsv
+  susiex-pipeline dry-run .       # optional
+  sbatch submit.sh
+EOF
+}
+
+cmd_init() {
+    local target="${1:-.}"
+    target="$(cd "$target" && pwd)"  # canonicalize
+
+    # Refuse to clobber existing configs/submit.sh — too risky
+    for f in config/pipeline.yaml config/cohorts.yaml config/loci.tsv submit.sh; do
+        if [[ -e "$target/$f" ]]; then
+            echo "ERROR: $target/$f already exists. Refusing to overwrite." >&2
+            echo "       Move or remove existing files first, or use a fresh directory." >&2
+            exit 1
+        fi
+    done
+
+    mkdir -p "$target/config"
+
+    # Resolve default binaries from the install's pipeline.yaml if it has them.
+    # This lets the admin set sane defaults centrally.
+    local default_susiex default_plink
+    if [[ -f "$PIPELINE_ROOT/config/pipeline.yaml" ]]; then
+        default_susiex=$("$PYTHON" "$PIPELINE_ROOT/scripts/lib/parse_yaml.py" \
+            get "$PIPELINE_ROOT/config/pipeline.yaml" susiex_bin 2>/dev/null || echo "")
+        default_plink=$("$PYTHON" "$PIPELINE_ROOT/scripts/lib/parse_yaml.py" \
+            get "$PIPELINE_ROOT/config/pipeline.yaml" plink_bin 2>/dev/null || echo "")
+    fi
+    [[ -z "${default_susiex:-}" ]] && default_susiex="/path/to/SuSiEx"
+    [[ -z "${default_plink:-}"  ]] && default_plink="/path/to/plink"
+
+    # Render templates
+    sed -e "s|__SUSIEX_BIN__|$default_susiex|g" \
+        -e "s|__PLINK_BIN__|$default_plink|g" \
+        "$PIPELINE_ROOT/templates/pipeline.yaml.template" \
+        > "$target/config/pipeline.yaml"
+
+    cp "$PIPELINE_ROOT/templates/cohorts.yaml.template" "$target/config/cohorts.yaml"
+    cp "$PIPELINE_ROOT/templates/loci.tsv.template"     "$target/config/loci.tsv"
+
+    sed -e "s|__PIPELINE_ROOT__|$PIPELINE_ROOT|g" \
+        "$PIPELINE_ROOT/templates/submit.sh.template" \
+        > "$target/submit.sh"
+    chmod +x "$target/submit.sh"
+
+    cat <<EOF
+Initialized analysis directory: $target
+
+Files created:
+  config/pipeline.yaml    -- main config (phenotype, paths, SuSiEx params)
+  config/cohorts.yaml     -- cohort manifest
+  config/loci.tsv         -- loci to fine-map
+  submit.sh               -- SLURM controller job
+
+Next steps:
+  1. cd $target
+  2. Edit the three config files for your analysis.
+  3. Optional: susiex-pipeline dry-run .
+  4. sbatch submit.sh
+EOF
+}
+
+cmd_dry_run() {
+    local target="${1:-.}"
+    target="$(cd "$target" && pwd)"
+
+    if [[ ! -f "$target/config/pipeline.yaml" ]]; then
+        echo "ERROR: $target/config/pipeline.yaml not found." >&2
+        echo "       Did you run 'susiex-pipeline init' here?" >&2
+        exit 1
+    fi
+    if [[ ! -f "$PIPELINE_ROOT/venv/bin/activate" ]]; then
+        echo "ERROR: shared venv not found at $PIPELINE_ROOT/venv" >&2
+        echo "       Ask the pipeline admin to run: $PIPELINE_ROOT/install.sh" >&2
+        exit 1
+    fi
+
+    cd "$target"
+    # shellcheck source=/dev/null
+    source "$PIPELINE_ROOT/venv/bin/activate"
+
+    snakemake \
+        --snakefile "$PIPELINE_ROOT/Snakefile" \
+        --configfile config/pipeline.yaml \
+        --use-envmodules \
+        --dry-run \
+        --printshellcmds
+}
+
+[[ "$#" -lt 1 ]] && { usage; exit 1; }
+CMD="$1"; shift
+
+case "$CMD" in
+    init)        cmd_init "$@" ;;
+    dry-run)     cmd_dry_run "$@" ;;
+    version|-v|--version)
+        if [[ -f "$PIPELINE_ROOT/VERSION" ]]; then
+            cat "$PIPELINE_ROOT/VERSION"
+        else
+            echo "unknown"
+        fi
+        ;;
+    help|-h|--help) usage ;;
+    *)
+        echo "Unknown subcommand: $CMD" >&2
+        echo ""
+        usage
+        exit 1
+        ;;
+esac

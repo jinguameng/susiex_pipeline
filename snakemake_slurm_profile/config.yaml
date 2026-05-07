@@ -1,0 +1,36 @@
+# =============================================================================
+# Snakemake SLURM profile
+# -----------------------------------------------------------------------------
+# Tells Snakemake to submit each rule as a SLURM job via the slurm executor.
+# Per-rule resource requests come from the `resources:` blocks in the
+# Snakefile; defaults below cover anything that doesn't override them.
+#
+# Used by the generated submit.sh as: snakemake --profile <this dir> ...
+#
+# Customize for your cluster: the partition name in default-resources is
+# the most likely thing to need editing.
+# =============================================================================
+
+executor: slurm
+
+# Maximum number of concurrent SLURM jobs Snakemake will keep in flight.
+jobs: 50
+
+# Default resources for any rule that doesn't override them.
+default-resources:
+  - slurm_partition=production
+  - mem_mb=8000
+  - runtime=60          # minutes
+  - cpus_per_task=2
+
+# How often Snakemake polls SLURM for job status (seconds).
+latency-wait: 60
+
+# If a job dies mid-write, re-run it cleanly.
+rerun-incomplete: true
+
+# Show shell commands as they run (helpful for debugging).
+printshellcmds: true
+
+# Keep going even if some loci fail; we want partial results.
+keep-going: true

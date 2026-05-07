@@ -1,0 +1,32 @@
+# =============================================================================
+# pipeline.yaml -- analysis configuration
+# =============================================================================
+# Edit the fields below for your analysis. All paths can be absolute, or
+# relative to this analysis directory.
+# =============================================================================
+
+# Short label for this analysis. Used in output filenames and folder names.
+phenotype: my_phenotype
+
+# Where outputs go. Will create:
+#   <output_root>/<phenotype>/inputs/
+#   <output_root>/<phenotype>/loci/<locus_name>/
+#   <output_root>/<phenotype>/logs/
+output_root: ./output
+
+# Tool binaries (defaults match the shared install; override only if needed).
+susiex_bin: __SUSIEX_BIN__
+plink_bin:  __PLINK_BIN__
+
+# Inputs (relative to this analysis directory, unless absolute).
+cohorts_config: config/cohorts.yaml
+loci_file:      config/loci.tsv
+
+# SuSiEx parameters
+susiex:
+  level:       0.95     # credible set coverage (e.g., 0.95 for 95% CS)
+  pval_thresh: 1e-4     # filter input variants on marginal p before fitting
+  maf:         0.005    # minor allele frequency threshold
+  mult_step:   true     # heuristic L selection (recommended)
+  keep_ambig:  false    # drop strand-ambiguous SNPs (A/T, C/G)
+  threads:     16       # CPUs per SuSiEx job

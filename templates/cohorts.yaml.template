@@ -1,0 +1,27 @@
+# =============================================================================
+# cohorts.yaml -- per-cohort manifest
+# =============================================================================
+# One entry per cohort. All cohorts listed here are passed jointly to SuSiEx
+# (per-cohort fine-mapping with cohort-specific LD).
+#
+# Required fields:
+#   name        Short identifier (used in filenames and logs).
+#   ancestry    Free-form label (informational only).
+#   n_gwas      Per-cohort GWAS sample size.
+#   bim_prefix  PLINK reference prefix (no .bim/.bed/.fam extension).
+#   gwas_file   PLINK assoc file (.assoc.linear or .assoc.logistic, optionally
+#               gzipped). The pipeline auto-detects BETA vs OR.
+# =============================================================================
+
+cohorts:
+  - name: COHORT1
+    ancestry: EUR
+    n_gwas: 1000
+    bim_prefix: /path/to/COHORT1_imputed_unrelated_final
+    gwas_file:  /path/to/COHORT1_baseline.assoc.linear
+
+  # - name: COHORT2
+  #   ancestry: EUR
+  #   n_gwas: 1500
+  #   bim_prefix: /path/to/COHORT2_imputed_unrelated_final
+  #   gwas_file:  /path/to/COHORT2_baseline.assoc.linear

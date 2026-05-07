@@ -1,0 +1,12 @@
+# Python virtual environment
+venv/
+__pycache__/
+
+# Output and Log directories
+output/
+logs/
+*.log
+
+# Mac System Files
+.DS_Store
+
