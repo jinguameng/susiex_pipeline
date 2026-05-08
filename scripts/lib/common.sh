@@ -67,8 +67,8 @@ load_pipeline_config() {
     LOCI_FILE=$(yaml_get "$cfg" loci_file)
 
     # Resolve relative paths against the pipeline root for portability.
-    [[ "$COHORTS_CFG" != /* ]] && COHORTS_CFG="$PIPELINE_ROOT/$COHORTS_CFG"
-    [[ "$LOCI_FILE"   != /* ]] && LOCI_FILE="$PIPELINE_ROOT/$LOCI_FILE"
+    [[ "$COHORTS_CFG" != /* ]] && COHORTS_CFG="$PWD/$COHORTS_CFG"
+    [[ "$LOCI_FILE"   != /* ]] && LOCI_FILE="$PWD/$LOCI_FILE"
 
     PHENO_OUT="$OUTPUT_ROOT/$PHENO"
     INPUTS_DIR="$PHENO_OUT/inputs"

@@ -28,6 +28,12 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --output=slurm_controller_%j.log
 #SBATCH --error=slurm_controller_%j.log
+#SBATCH --account=h_vmac
+
+# OPTIONAL: To receive an email when this controller job finishes, remove 
+# one '#' from the two lines below and add your actual email address.
+##SBATCH --mail-type=ALL
+##SBATCH --mail-user=YOUR.EMAIL@vumc.org
 
 set -euo pipefail
 
@@ -105,6 +111,11 @@ snakemake \
     --keep-going \
     "$@" \
     2>&1 | tee "$SNAKE_LOG"
+
+# NOTE: If you want to receive emails for every single per-locus worker job, 
+# you can pass your email directly to the SLURM executor by adding this flag 
+# to the snakemake command above (before the "$@" line):
+#    --default-resources slurm_account=h_vmac slurm_extra="'--mail-type=ALL --mail-user=YOUR.EMAIL@vumc.org'" \
 
 rc=${PIPESTATUS[0]}
 echo ""
