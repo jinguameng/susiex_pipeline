@@ -1,16 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# 02_run_susiex_one_locus.sh
+# run_susiex_one_locus.sh
 # -----------------------------------------------------------------------------
 # Run SuSiEx for ONE locus, identified by its 1-based index in loci.tsv.
-#
-# Used by:
-#   - SLURM array tasks:    $SLURM_ARRAY_TASK_ID is the locus index
-#   - Snakemake rules:      one locus per rule invocation
-#   - Manual single runs:   debug a specific locus without re-running others
-#
-# Usage:
-#     ./02_run_susiex_one_locus.sh <pipeline.yaml> <locus_index_1based> [--force]
 # =============================================================================
 set -euo pipefail
 
@@ -48,7 +40,7 @@ KEEP_AMBIG=$(to_pyflag "$KEEP_AMBIG")
 
 # ---- Build comma-separated cohort args --------------------------------------
 N_COHORTS=$(yaml_count "$COHORTS_CFG" cohorts)
-sst_files=(); n_gwas_list=(); ref_files=()
+sst_files=(); n_gwas_list=(); ref_files=(); cohort_names=()
 for ((i=0; i<N_COHORTS; i++)); do
     IFS=$'\t' read -r name n_gwas bim_prefix < <(
         yaml_row "$COHORTS_CFG" cohorts "$i" name n_gwas bim_prefix
@@ -58,11 +50,13 @@ for ((i=0; i<N_COHORTS; i++)); do
     sst_files+=("$sst")
     n_gwas_list+=("$n_gwas")
     ref_files+=("$bim_prefix")
+    cohort_names+=("$name")
 done
 join_csv() { local IFS=','; echo "$*"; }
 SST_ARG=$(join_csv "${sst_files[@]}")
 NGWAS_ARG=$(join_csv "${n_gwas_list[@]}")
 REF_ARG=$(join_csv "${ref_files[@]}")
+
 build_col_arg() { local val="$1" n="$2"; local arr=(); for ((j=0;j<n;j++)); do arr+=("$val"); done; join_csv "${arr[@]}"; }
 SNP_COL=$(build_col_arg 2 "$N_COHORTS")
 CHR_COL=$(build_col_arg 1 "$N_COHORTS")
@@ -102,6 +96,13 @@ mkdir -p "$LOCUS_DIR"
 OUT_NAME="SuSiEx.${PHENO}.${locus_name}"
 CS_OUT="$LOCUS_DIR/${OUT_NAME}.cs"
 
+# --- NEW: Build LD_ARG for SuSiEx to save computed LD matrices
+ld_files=()
+for name in "${cohort_names[@]}"; do
+    ld_files+=("$LOCUS_DIR/${name}_LD")
+done
+LD_ARG=$(join_csv "${ld_files[@]}")
+
 if [[ -s "$CS_OUT" && "$FORCE" != "true" ]]; then
     log_info "Output exists, skipping (use --force to regenerate): $CS_OUT"
     exit 0
@@ -111,6 +112,7 @@ fi
     --sst_file="$SST_ARG" \
     --n_gwas="$NGWAS_ARG" \
     --ref_file="$REF_ARG" \
+    --ld_file="$LD_ARG" \
     --out_dir="$LOCUS_DIR" \
     --out_name="$OUT_NAME" \
     --level="$LEVEL" \
